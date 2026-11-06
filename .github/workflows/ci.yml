@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --all-groups
+      - name: Lint
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Test (no network)
+        run: uv run pytest
+      - name: Smoke the CLI
+        run: uv run omni --version
+
+  secrets:
+    # The gitleaks CLI is used directly rather than gitleaks/gitleaks-action: the action
+    # needs a token that can read PR commits (403 with the default GITHUB_TOKEN) and a
+    # GITLEAKS_LICENSE on organization-owned repositories. The CLI needs neither.
+    #
+    # Full history is scanned on every run. The pre-v2 credential file was purged from all
+    # branches by a history rewrite on 2026-10-31, so a hit anywhere now means a new leak.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan the full history with gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks git --redact --verbose --exit-code 1 .
